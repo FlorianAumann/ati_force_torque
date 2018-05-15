@@ -36,8 +36,6 @@ else()
   set(Eigen_INCLUDE_DIRS ${EIGEN3_INCLUDE_DIR})
   set(Eigen_LIBRARIES ${EIGEN3_LIBRARIES})
 endif()
-    set(Libserial_INCLUDE_DIRS "//home//praktikum1//workspace//libserial_lib//include")
-    set(Libserial_LIBRARIES "/home/praktikum1/workspace/libserial_lib/lib/libserial.so")
     set(Libmodbus_INCLUDE_DIRS "//home//praktikum1//workspace//libmodbus//include//")
     set(Libmodbus_LIBRARIES "//home//praktikum1//workspace//libmodbus//lib//libmodbus.so")
 

@@ -57,8 +57,8 @@
 
 // Headers provided by other cob-packages
 #include <cob_generic_can/CanItf.h>
-#include <SerialStream.h>
-#include <SerialStreamBuf.h>
+#include <modbus/modbus-rtu.h>
+#include <modbus/modbus-rtu.h>
 
 #define DEBUG 0
 
@@ -81,6 +81,30 @@
 #define ATI_CAN_BAUD_500K 3
 #define ATI_CAN_BAUD_250K 7
 
+#define MODBUSBAUD_125K		1250000
+#define MODBUSBAUD_115200	115200
+#define MODBUSBAUD_19200	1250000
+
+enum ForceUnit
+{
+	FU_POUNDS,
+	FU_NEWTON,
+	FU_KILOPOUND,
+	FU_KILONEWTON,
+	FU_K_EQV_FORCE,
+	FU_G_EQV_FORCE
+};
+
+enum TorqueUnit
+{
+	TU_POUNDS_INCH,
+	TU_PUBD_FOOT,
+	TU_NEWTON_METER,
+	TU_NEWTON_MILITMETER,
+	TU_K_EQV_CENTIMETER,
+	TU_KILONEWTONMETER
+};
+
 class ForceTorqueCtrl
 {
 public:
@@ -97,6 +121,7 @@ public:
   bool SetBaudRate(int value);
   bool SetBaseIdentifier(int identifier);
   bool Reset();
+  bool Close();
   bool ReadSGData(int statusCode, double& Fx, double& Fy, double& Fz, double& Tx, double& Ty, double& Tz);
   bool ReadFirmwareVersion();
   void ReadCalibrationMatrix();
@@ -124,12 +149,13 @@ protected:
 private:
   CanMsg CMsg;
   CanItf* m_pCanCtrl;
-  LibSerial::SerialStream* m_pRS485Ctrl;
+  modbus_t* modbusCtrl;
 
   int m_CanType;
   std::string m_RS485Device;
+  int m_ModbusBaseIdentifier;
+  int m_ModbusBaudrate;
   std::string m_CanDevice;
-  LibSerial::SerialStreamBuf::BaudRateEnum m_RS485Baudrate;
   int m_CanBaudrate;
   int m_CanBaseIdentifier;
 

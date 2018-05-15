@@ -53,8 +53,6 @@
 
 #include <cob_forcetorque/ForceTorqueCtrl.h>
 
-#include <modbus/modbus-rtu.h>
-
 // Headrs provided by cob-packages
 //#include <cob_generic_can/CanESD.h>
 //#include <cob_generic_can/CanPeakSys.h>
@@ -69,8 +67,9 @@ ForceTorqueCtrl::ForceTorqueCtrl()
   // https://github.com/ipa320/cob_robots/blob/hydro_dev/cob_hardware_config/raw3-5/config/base/CanCtrl.ini
   m_CanType = CANITFTYPE_CAN_PEAK_USB;
   m_RS485Device = "/dev/ttyUSB0";
+  m_ModbusBaseIdentifier = 0x20 << 4;  	//Where do I find the ID?
+  m_ModbusBaudrate = MODBUSBAUD_125K;		///By default, the baudrate is set to 1.250.000
   m_CanDevice = "/dev/pcan32";
-  m_RS485Baudrate = LibSerial::SerialStreamBuf::BaudRateEnum::BAUD_DEFAULT;
   m_CanBaudrate = CANITFBAUD_250K;
   m_CanBaseIdentifier = 0x20 << 4;
 }
@@ -101,7 +100,7 @@ bool ForceTorqueCtrl::Init()
 
   if (initRS485())
   {
-    // This is way of testig if communication is also successful
+    // This is way of testing if communication is also successful
     if (!ReadFTSerialNumber())
     {
       std::cout << "Can not read Serial Number from FTS!" << std::endl;
@@ -138,23 +137,17 @@ bool ForceTorqueCtrl::Init()
 bool ForceTorqueCtrl::initRS485()
 {
   //bool ret = true;
-  m_pRS485Ctrl = new LibSerial::SerialStream(m_RS485Device, std::ios::in|std::ios::out);
-  if (!m_pRS485Ctrl->good())
+  modbusCtrl = modbus_new_rtu(m_RS485Device.c_str(), m_ModbusBaudrate, 'r', 0, 0);
+
+  modbus_set_slave(modbusCtrl, m_ModbusBaseIdentifier);
+
+  int rc = modbus_rtu_set_serial_mode(modbusCtrl, MODBUS_RTU_RS485);
+  printf("modbus_rtu_set_serial_mode: %d \n",rc);
+
+  if (rc != 0)
   {
-      std::cerr << "Error: Could not open serial port " << std::endl ;
-      return false;
+	  printf("modbus_rtu_set_serial_mode: %s \n",modbus_strerror(errno));
   }
-  m_pRS485Ctrl->SetBaudRate(m_RS485Baudrate);
-  if (!m_pRS485Ctrl->good())
-  {
-      std::cerr << "Error: Could not set the baud rate." << std::endl ;
-      return false;
-  }
-
-  modbus_t* myModbus = modbus_new_rtu(m_RS485Device.c_str(), 10, 'r', 0, 0);
-
-  modbus_set_slave(myModbus, m_CanBaseIdentifier);
-
 
 //  // current implementation only for CanPeakSysUSB and SocketCan
 //  switch (m_CanType)
@@ -177,56 +170,126 @@ bool ForceTorqueCtrl::ReadFTSerialNumber()
 #if DEBUG
   std::cout << "\n\n*********FTSerialNumber**********" << std::endl;
 #endif
-  bool ret = true;
-  CanMsg CMsg;
-  CMsg.setID(m_CanBaseIdentifier | READ_SERIALNR);
-  CMsg.setLength(0);
-  ret = m_pCanCtrl->transmitMsg(CMsg, true);
-  if (ret)
-  {
-    CanMsg replyMsg;
-    replyMsg.set(0, 0, 0, 0, 0, 0, 0, 0);
-    char next_byte ;
-    //input_file.read( &next_byte, 1 ) ;
-    ret = m_pCanCtrl->receiveMsgRetry(&replyMsg, 10);
+  uint16_t tab_reg[128];
 
-    if (ret)
-    {
-#if DEBUG
-      std::cout << "reply ID: \t" << std::hex << replyMsg.getID() << std::endl;
-      std::cout << "reply Length: \t" << replyMsg.getLength() << std::endl;
-#endif
-      if (replyMsg.getID() == (m_CanBaseIdentifier | READ_SERIALNR))
-      {
-#if DEBUG
-        std::cout << "Reading Serial Number Succeeded!" << std::endl;
-        std::cout << "reply Data: \t" << (char)replyMsg.getAt(0) << " " << (char)replyMsg.getAt(1) << " "
-                  << (char)replyMsg.getAt(2) << " " << (char)replyMsg.getAt(3) << " " << (char)replyMsg.getAt(4) << " "
-                  << (char)replyMsg.getAt(5) << " " << (char)replyMsg.getAt(6) << " " << (char)replyMsg.getAt(7)
-                  << std::endl;
-#endif
-      }
-      else
-      {
-#if DEBUG
-        std::cout << "Error: Received wrong opcode!" << std::endl;
-#endif
-        ret = false;
-      }
-    }
-    else
-    {
-#if DEBUG
-      std::cout << "ForceTorqueCtrl::ReadFTSerialNumber(): Can not read message!" << std::endl;
-#endif
-    }
-  }
-  else
+  int rc = modbus_read_registers(modbusCtrl, 0x00e3, 16, tab_reg);
+  if (rc == -1)
   {
-#if DEBUG
-    std::cout << "ForceTorqueCtrl::ReadFTSerialNumber(): Can not transmit message!" << std::endl;
-#endif
+	  #if DEBUG
+		  std::cout << "Reading failed with status " << rc << std::endl;
+	  #endif
+      fprintf(stderr, "%s\n", modbus_strerror(errno));
+      return true;
   }
+  for (unsigned int i=0; i < rc; i++)
+  {
+	  printf("reg[%d]=%d (0x%X)\n", i, tab_reg[i], tab_reg[i]);
+  }
+  std::string calibSerialNumber = std::string( tab_reg[0], tab_reg[4] );;
+  std::cout << "Serial Number is " << calibSerialNumber << std::endl;
+  std::string calibPartNumberNumber = std::string( tab_reg[4], tab_reg[20] );;
+  std::cout << "Calib Part Number is " << calibPartNumberNumber << std::endl;
+  std::string calibFamilyID = std::string( tab_reg[20], tab_reg[22] );;
+  std::cout << "Calib Family ID is " << calibFamilyID << std::endl;
+  std::string calibTime = std::string( tab_reg[22], tab_reg[32] );;
+  std::cout << "Calib Time is " << calibTime << std::endl;
+  float basicMatrix[6][6];
+  for (unsigned int i = 0; i < 6; i++)
+  {
+	  for (unsigned int j = 0; j < 6; j++)
+	  {
+		  basicMatrix[i][j] = modbus_get_float(&tab_reg[32+i*2+j*2*6]);
+	  }
+  }
+  uint8_t forceUnitsInt = (tab_reg[104] & 0x8);
+  uint8_t torqueUnitsInt = (tab_reg[104] >> 8) & 0x8;
+  ForceUnit forceUnits = static_cast<ForceUnit>(forceUnitsInt);
+  TorqueUnit torqueUnits = static_cast<TorqueUnit>(torqueUnitsInt);
+  std::cout << "Force Unit is " << forceUnitsInt << std::endl;
+  std::cout << "Torque Unit is " << torqueUnitsInt << std::endl;
+  float maxRating[6];
+  std::cout << "MaxRating = [";
+  for (unsigned int i = 0; i < 6; i++)
+  {
+	  maxRating[i] = modbus_get_float(&tab_reg[105+i*2]);
+	  std::cout << maxRating[i] << ", ";
+  }
+  std::cout << "]" << std::endl;;
+  int32_t countsPerForce;
+  countsPerForce = (tab_reg[106] << 16) | tab_reg[107];
+  std::cout << "Counts per force " << countsPerForce << std::endl;
+  int32_t countsPerTorque;
+  countsPerTorque = (tab_reg[108] << 16) | tab_reg[109];
+  std::cout << "Counts per torque " << countsPerTorque << std::endl;
+
+  uint16_t gageGain[6];
+  std::cout << "gageGain = [";
+  for (unsigned int i = 0; i < 6; i++)
+  {
+	  gageGain[i] = tab_reg[110+i];
+	  std::cout << gageGain[i] << ", ";
+  }
+  std::cout << "]" << std::endl;
+
+  uint16_t gageOffset[6];
+  std::cout << "gageOffset = [";
+  for (unsigned int i = 0; i < 6; i++)
+  {
+	  gageOffset[i] = tab_reg[116+i];
+	  std::cout << gageOffset[i] << ", ";
+  }
+  std::cout << "]" << std::endl;
+
+  bool ret = true;
+//  CanMsg CMsg;
+//  CMsg.setID(m_CanBaseIdentifier | READ_SERIALNR);
+//  CMsg.setLength(0);
+//  ret = m_pCanCtrl->transmitMsg(CMsg, true);
+//  if (ret)
+//  {
+//    CanMsg replyMsg;
+//    replyMsg.set(0, 0, 0, 0, 0, 0, 0, 0);
+//    char next_byte ;
+//    //input_file.read( &next_byte, 1 ) ;
+//    ret = m_pCanCtrl->receiveMsgRetry(&replyMsg, 10);
+//
+//    if (ret)
+//    {
+//#if DEBUG
+//      std::cout << "reply ID: \t" << std::hex << replyMsg.getID() << std::endl;
+//      std::cout << "reply Length: \t" << replyMsg.getLength() << std::endl;
+//#endif
+//      if (replyMsg.getID() == (m_CanBaseIdentifier | READ_SERIALNR))
+//      {
+//#if DEBUG
+//        std::cout << "Reading Serial Number Succeeded!" << std::endl;
+//        std::cout << "reply Data: \t" << (char)replyMsg.getAt(0) << " " << (char)replyMsg.getAt(1) << " "
+//                  << (char)replyMsg.getAt(2) << " " << (char)replyMsg.getAt(3) << " " << (char)replyMsg.getAt(4) << " "
+//                  << (char)replyMsg.getAt(5) << " " << (char)replyMsg.getAt(6) << " " << (char)replyMsg.getAt(7)
+//                  << std::endl;
+//#endif
+//      }
+//      else
+//      {
+//#if DEBUG
+//        std::cout << "Error: Received wrong opcode!" << std::endl;
+//#endif
+//        ret = false;
+//      }
+//    }
+//    else
+//    {
+//#if DEBUG
+//      std::cout << "ForceTorqueCtrl::ReadFTSerialNumber(): Can not read message!" << std::endl;
+//#endif
+//    }
+//  }
+//  else
+//  {
+//#if DEBUG
+//    std::cout << "ForceTorqueCtrl::ReadFTSerialNumber(): Can not transmit message!" << std::endl;
+//#endif
+//  }
 
   return ret;
 }
@@ -518,6 +581,14 @@ bool ForceTorqueCtrl::Reset()
   usleep(10000);
 
   return ret;
+}
+
+bool ForceTorqueCtrl::Close()
+{
+  modbus_close(modbusCtrl);
+  modbus_free(modbusCtrl);
+
+  return true;
 }
 
 bool ForceTorqueCtrl::SetBaseIdentifier(int identifier)
