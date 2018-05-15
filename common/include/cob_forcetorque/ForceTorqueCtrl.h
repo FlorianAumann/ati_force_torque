@@ -57,6 +57,8 @@
 
 // Headers provided by other cob-packages
 #include <cob_generic_can/CanItf.h>
+#include <SerialStream.h>
+#include <SerialStreamBuf.h>
 
 #define DEBUG 0
 
@@ -113,7 +115,7 @@ public:
   void StrainGaugeToForce(int& sg0, int& sg1, int& sg2, int& sg3, int& sg4, int& sg5);
 
 protected:
-  bool initCan();
+  bool initRS485();
 
   //--------------------------------- Variables
   CanMsg m_CanMsgRec;
@@ -122,9 +124,12 @@ protected:
 private:
   CanMsg CMsg;
   CanItf* m_pCanCtrl;
+  LibSerial::SerialStream* m_pRS485Ctrl;
 
   int m_CanType;
+  std::string m_RS485Device;
   std::string m_CanDevice;
+  LibSerial::SerialStreamBuf::BaudRateEnum m_RS485Baudrate;
   int m_CanBaudrate;
   int m_CanBaseIdentifier;
 

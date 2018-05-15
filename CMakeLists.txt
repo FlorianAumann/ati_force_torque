@@ -36,6 +36,10 @@ else()
   set(Eigen_INCLUDE_DIRS ${EIGEN3_INCLUDE_DIR})
   set(Eigen_LIBRARIES ${EIGEN3_LIBRARIES})
 endif()
+    set(Libserial_INCLUDE_DIRS "//home//praktikum1//workspace//libserial_lib//include")
+    set(Libserial_LIBRARIES "/home/praktikum1/workspace/libserial_lib/lib/libserial.so")
+    set(Libmodbus_INCLUDE_DIRS "//home//praktikum1//workspace//libmodbus//include//")
+    set(Libmodbus_LIBRARIES "//home//praktikum1//workspace//libmodbus//lib//libmodbus.so")
 
 include(CheckCXXCompilerFlag)
 CHECK_CXX_COMPILER_FLAG("-std=c++11" Cpp11CompilerFlag)
@@ -84,6 +88,8 @@ include_directories(
   include
   ${catkin_INCLUDE_DIRS}
   ${Eigen_INCLUDE_DIRS}
+  ${Libserial_INCLUDE_DIRS}
+  ${Libmodbus_INCLUDE_DIRS}
 )
 
 add_library(${PROJECT_NAME} common/src/ForceTorqueCtrl.cpp src/force_torque_sensor.cpp)
@@ -92,7 +98,7 @@ add_dependencies(${PROJECT_NAME}
   ${PROJECT_NAME}_generate_messages_cpp
   ${PROJECT_NAME}_genparam # For rosparam_handler
   )
-target_link_libraries(${PROJECT_NAME} ${catkin_LIBRARIES} ${Eigen_LIBRARIES})
+target_link_libraries(${PROJECT_NAME} ${catkin_LIBRARIES} ${Eigen_LIBRARIES} ${Libserial_LIBRARIES} ${Libmodbus_LIBRARIES})
 
 add_library(${PROJECT_NAME}_sensor_hw common/src/ati_force_torque_hw_can.cpp)
 target_link_libraries(${PROJECT_NAME}_sensor_hw ${catkin_LIBRARIES} ${Eigen_LIBRARIES})

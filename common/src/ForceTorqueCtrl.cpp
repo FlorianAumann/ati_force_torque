@@ -53,6 +53,8 @@
 
 #include <cob_forcetorque/ForceTorqueCtrl.h>
 
+#include <modbus/modbus-rtu.h>
+
 // Headrs provided by cob-packages
 //#include <cob_generic_can/CanESD.h>
 //#include <cob_generic_can/CanPeakSys.h>
@@ -66,7 +68,9 @@ ForceTorqueCtrl::ForceTorqueCtrl()
   // for types and baudrates see:
   // https://github.com/ipa320/cob_robots/blob/hydro_dev/cob_hardware_config/raw3-5/config/base/CanCtrl.ini
   m_CanType = CANITFTYPE_CAN_PEAK_USB;
+  m_RS485Device = "/dev/ttyUSB0";
   m_CanDevice = "/dev/pcan32";
+  m_RS485Baudrate = LibSerial::SerialStreamBuf::BaudRateEnum::BAUD_DEFAULT;
   m_CanBaudrate = CANITFBAUD_250K;
   m_CanBaseIdentifier = 0x20 << 4;
 }
@@ -95,7 +99,7 @@ bool ForceTorqueCtrl::Init()
 {
   bool ret = true;
 
-  if (initCan())
+  if (initRS485())
   {
     // This is way of testig if communication is also successful
     if (!ReadFTSerialNumber())
@@ -124,31 +128,48 @@ bool ForceTorqueCtrl::Init()
   }
   else
   {
-    std::cout << "CAN initialisation unsuccessful!" << std::endl;
+    std::cout << "RS485 initialisation unsuccessful!" << std::endl;
     ret = false;
   }
 
   return ret;
 }
 
-bool ForceTorqueCtrl::initCan()
+bool ForceTorqueCtrl::initRS485()
 {
-  bool ret = true;
-
-  // current implementation only for CanPeakSysUSB and SocketCan
-  switch (m_CanType)
+  //bool ret = true;
+  m_pRS485Ctrl = new LibSerial::SerialStream(m_RS485Device, std::ios::in|std::ios::out);
+  if (!m_pRS485Ctrl->good())
   {
-    case CANITFTYPE_CAN_PEAK_USB:
-      m_pCanCtrl = new CANPeakSysUSB(m_CanDevice.c_str(), m_CanBaudrate);
-      ret = m_pCanCtrl->init_ret();
-      break;
-
-    case CANITFTYPE_SOCKET_CAN:
-      m_pCanCtrl = new SocketCan(m_CanDevice.c_str());
-      ret = m_pCanCtrl->init_ret();
-      break;
+      std::cerr << "Error: Could not open serial port " << std::endl ;
+      return false;
   }
-  return ret;
+  m_pRS485Ctrl->SetBaudRate(m_RS485Baudrate);
+  if (!m_pRS485Ctrl->good())
+  {
+      std::cerr << "Error: Could not set the baud rate." << std::endl ;
+      return false;
+  }
+
+  modbus_t* myModbus = modbus_new_rtu(m_RS485Device.c_str(), 10, 'r', 0, 0);
+
+  modbus_set_slave(myModbus, m_CanBaseIdentifier);
+
+
+//  // current implementation only for CanPeakSysUSB and SocketCan
+//  switch (m_CanType)
+//  {
+//    case CANITFTYPE_CAN_PEAK_USB:
+//      m_pCanCtrl = new CANPeakSysUSB(m_CanDevice.c_str(), m_CanBaudrate);
+//      ret = m_pCanCtrl->init_ret();
+//      break;
+//
+//    case CANITFTYPE_SOCKET_CAN:
+//      m_pCanCtrl = new SocketCan(m_CanDevice.c_str());
+//      ret = m_pCanCtrl->init_ret();
+//      break;
+//  }
+//  return ret;
 }
 
 bool ForceTorqueCtrl::ReadFTSerialNumber()
@@ -165,6 +186,8 @@ bool ForceTorqueCtrl::ReadFTSerialNumber()
   {
     CanMsg replyMsg;
     replyMsg.set(0, 0, 0, 0, 0, 0, 0, 0);
+    char next_byte ;
+    //input_file.read( &next_byte, 1 ) ;
     ret = m_pCanCtrl->receiveMsgRetry(&replyMsg, 10);
 
     if (ret)
