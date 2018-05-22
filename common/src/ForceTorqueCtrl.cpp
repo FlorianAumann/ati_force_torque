@@ -5,7 +5,7 @@
  * Intelligent Process Control and Robotics (IPR),
  * Karlsruhe Institute of Technology
  *
- * Maintainer: Denis Štogl, email: denis.stogl@kit.edu
+ * Maintainer: Denis ��togl, email: denis.stogl@kit.edu
  *
  * Date of update: 2014-2016
  *
@@ -54,43 +54,31 @@
 #include <cob_forcetorque/ForceTorqueCtrl.h>
 
 // Headrs provided by cob-packages
-//#include <cob_generic_can/CanESD.h>
-//#include <cob_generic_can/CanPeakSys.h>
 #include <cob_generic_can/CanPeakSysUSB.h>
 #include <cob_generic_can/SocketCan.h>
 
 ForceTorqueCtrl::ForceTorqueCtrl()
 {
-  m_pCanCtrl = NULL;
-
   // for types and baudrates see:
   // https://github.com/ipa320/cob_robots/blob/hydro_dev/cob_hardware_config/raw3-5/config/base/CanCtrl.ini
-  m_CanType = CANITFTYPE_CAN_PEAK_USB;
   m_RS485Device = "/dev/ttyUSB0";
-  m_ModbusBaseIdentifier = 0x20 << 4;  	//Where do I find the ID?
+  m_ModbusBaseIdentifier = 0xA;  			//ID of the ATI sensor is always set to 10 (As specified in 8.3)
   m_ModbusBaudrate = MODBUSBAUD_125K;		///By default, the baudrate is set to 1.250.000
-  m_CanDevice = "/dev/pcan32";
-  m_CanBaudrate = CANITFBAUD_250K;
-  m_CanBaseIdentifier = 0x20 << 4;
 }
 
-ForceTorqueCtrl::ForceTorqueCtrl(int can_type, std::string can_path, int can_baudrate, int base_identifier)
+ForceTorqueCtrl::ForceTorqueCtrl(std::string device_path, int device_baudrate, int base_identifier)
 {
-  m_pCanCtrl = NULL;
-
   // for types and baudrates see:
-  // https://github.com/ipa320/cob_robots/blob/hydro_dev/cob_hardware_config/raw3-5/config/base/CanCtrl.ini
-  m_CanType = can_type;
-  m_CanDevice = can_path;
-  m_CanBaudrate = can_baudrate;
-  m_CanBaseIdentifier = base_identifier << 4;
+  m_RS485Device = device_path;
+  m_ModbusBaudrate = device_baudrate;
+  m_ModbusBaseIdentifier = base_identifier;
 }
 
 ForceTorqueCtrl::~ForceTorqueCtrl()
 {
-  if (m_pCanCtrl != NULL)
+  if (m_modbusCtrl != NULL)
   {
-    delete m_pCanCtrl;
+    //delete m_modbusCtrl;		//TODO Delete here?
   }
 }
 
@@ -101,33 +89,18 @@ bool ForceTorqueCtrl::Init()
   if (initRS485())
   {
     // This is way of testing if communication is also successful
-    if (!ReadFTSerialNumber())
+    if (!ReadFTCalibrationData())
     {
-      std::cout << "Can not read Serial Number from FTS!" << std::endl;
-      ret = false;
-    }
-    if (!ReadFirmwareVersion())
-    {
-      std::cout << "Can not read Firmware version from FTS!" << std::endl;
-      ret = false;
-    }
-    if (!ReadCountsPerUnit())
-    {
-      std::cout << "Can not read Counts Per Unit from FTS!" << std::endl;
-      ret = false;
-    }
-    if (!ReadUnitCodes())
-    {
-      std::cout << "Can not read Unit Codes from FTS!" << std::endl;
+      std::cout << "Can not read Calibration Data from FTS!" << std::endl;
       ret = false;
     }
     // Add return values and checking
-    SetActiveCalibrationMatrix(0);
-    ReadCalibrationMatrix();
+    //SetActiveCalibrationMatrix(0);
+    SetCalibMatrix();
   }
   else
   {
-    std::cout << "RS485 initialisation unsuccessful!" << std::endl;
+    std::cout << "RS485 initialization unsuccessful!" << std::endl;
     ret = false;
   }
 
@@ -137,46 +110,34 @@ bool ForceTorqueCtrl::Init()
 bool ForceTorqueCtrl::initRS485()
 {
   //bool ret = true;
-  modbusCtrl = modbus_new_rtu(m_RS485Device.c_str(), m_ModbusBaudrate, 'r', 0, 0);
+  m_modbusCtrl = modbus_new_rtu(m_RS485Device.c_str(), m_ModbusBaudrate, 'r', 0, 0);
 
-  modbus_set_slave(modbusCtrl, m_ModbusBaseIdentifier);
+  modbus_set_slave(m_modbusCtrl, m_ModbusBaseIdentifier);
 
-  int rc = modbus_rtu_set_serial_mode(modbusCtrl, MODBUS_RTU_RS485);
+  int rc = modbus_rtu_set_serial_mode(m_modbusCtrl, MODBUS_RTU_RS485);
   printf("modbus_rtu_set_serial_mode: %d \n",rc);
 
   if (rc != 0)
   {
 	  printf("modbus_rtu_set_serial_mode: %s \n",modbus_strerror(errno));
+	  return false;
   }
 
-//  // current implementation only for CanPeakSysUSB and SocketCan
-//  switch (m_CanType)
-//  {
-//    case CANITFTYPE_CAN_PEAK_USB:
-//      m_pCanCtrl = new CANPeakSysUSB(m_CanDevice.c_str(), m_CanBaudrate);
-//      ret = m_pCanCtrl->init_ret();
-//      break;
-//
-//    case CANITFTYPE_SOCKET_CAN:
-//      m_pCanCtrl = new SocketCan(m_CanDevice.c_str());
-//      ret = m_pCanCtrl->init_ret();
-//      break;
-//  }
-//  return ret;
+  return true;
 }
 
-bool ForceTorqueCtrl::ReadFTSerialNumber()
+bool ForceTorqueCtrl::ReadFTCalibrationData()
 {
 #if DEBUG
   std::cout << "\n\n*********FTSerialNumber**********" << std::endl;
 #endif
-  uint16_t tab_reg[128];
+  uint16_t tab_reg[168];
 
-  int rc = modbus_read_registers(modbusCtrl, 0x00e3, 16, tab_reg);
+  int rc = modbus_read_registers(m_modbusCtrl, 0x00e3, 168, tab_reg);
   if (rc == -1)
   {
 	  #if DEBUG
-		  std::cout << "Reading failed with status " << rc << std::endl;
+		  std::cout << "Reading Calibration Data failed with status " << rc << std::endl;
 	  #endif
       fprintf(stderr, "%s\n", modbus_strerror(errno));
       return true;
@@ -185,88 +146,237 @@ bool ForceTorqueCtrl::ReadFTSerialNumber()
   {
 	  printf("reg[%d]=%d (0x%X)\n", i, tab_reg[i], tab_reg[i]);
   }
-  std::string calibSerialNumber = std::string( tab_reg[0], tab_reg[4] );;
-  std::cout << "Serial Number is " << calibSerialNumber << std::endl;
-  std::string calibPartNumberNumber = std::string( tab_reg[4], tab_reg[20] );;
-  std::cout << "Calib Part Number is " << calibPartNumberNumber << std::endl;
-  std::string calibFamilyID = std::string( tab_reg[20], tab_reg[22] );;
-  std::cout << "Calib Family ID is " << calibFamilyID << std::endl;
-  std::string calibTime = std::string( tab_reg[22], tab_reg[32] );;
-  std::cout << "Calib Time is " << calibTime << std::endl;
-  float basicMatrix[6][6];
+  m_calibrationData.calibSerialNumber = std::string( tab_reg[0], tab_reg[4] );
+#if DEBUG
+  std::cout << "Serial Number is " << m_calibrationData.calibSerialNumber << std::endl;
+#endif
+  m_calibrationData.calibPartNumberNumber = std::string( tab_reg[4], tab_reg[20] );
+#if DEBUG
+  std::cout << "Part Number is " << m_calibrationData.calibPartNumberNumber << std::endl;
+#endif
+  m_calibrationData.calibFamilyID =  std::string( tab_reg[20], tab_reg[22] );
+#if DEBUG
+  std::cout << "Calib Family ID is " << m_calibrationData.calibFamilyID << std::endl;
+#endif
+  m_calibrationData.calibTime =   std::string( tab_reg[22], tab_reg[32] );
+#if DEBUG
+  std::cout << "Calib Time is " << m_calibrationData.calibTime << std::endl;
+#endif
   for (unsigned int i = 0; i < 6; i++)
   {
-	  for (unsigned int j = 0; j < 6; j++)
-	  {
-		  basicMatrix[i][j] = modbus_get_float(&tab_reg[32+i*2+j*2*6]);
-	  }
+    for (unsigned int j = 0; j < 6; j++)
+    {
+    	m_calibrationData.basicMatrix[i][j] = modbus_get_float(&tab_reg[32+(i*6+j)*2]);
+    }
   }
-  uint8_t forceUnitsInt = (tab_reg[104] & 0x8);
-  uint8_t torqueUnitsInt = (tab_reg[104] >> 8) & 0x8;
-  ForceUnit forceUnits = static_cast<ForceUnit>(forceUnitsInt);
-  TorqueUnit torqueUnits = static_cast<TorqueUnit>(torqueUnitsInt);
-  std::cout << "Force Unit is " << forceUnitsInt << std::endl;
-  std::cout << "Torque Unit is " << torqueUnitsInt << std::endl;
-  float maxRating[6];
-  std::cout << "MaxRating = [";
+  m_calibrationData.forceUnitsInt = MODBUS_GET_LOW_BYTE(tab_reg[104]);
+#if DEBUG
+  std::cout << "Force Units are " << m_calibrationData.forceUnitsInt << std::endl;
+#endif
+  m_calibrationData.torqueUnitsInt = MODBUS_GET_HIGH_BYTE(tab_reg[104]);
+#if DEBUG
+  std::cout << "Torque Units are " << m_calibrationData.torqueUnitsInt << std::endl;
+#endif
   for (unsigned int i = 0; i < 6; i++)
   {
-	  maxRating[i] = modbus_get_float(&tab_reg[105+i*2]);
-	  std::cout << maxRating[i] << ", ";
+  	m_calibrationData.maxRating[i] = modbus_get_float(&tab_reg[105 +i*2]);
   }
-  std::cout << "]" << std::endl;;
-  int32_t countsPerForce;
-  countsPerForce = (tab_reg[106] << 16) | tab_reg[107];
-  std::cout << "Counts per force " << countsPerForce << std::endl;
-  int32_t countsPerTorque;
-  countsPerTorque = (tab_reg[108] << 16) | tab_reg[109];
-  std::cout << "Counts per torque " << countsPerTorque << std::endl;
+  m_calibrationData.countsPerForce = MODBUS_GET_INT32_FROM_INT16(tab_reg, 117);
+#if DEBUG
+  std::cout << "Counts per force are " << m_calibrationData.countsPerForce << std::endl;
+#endif
+  m_calibrationData.countsPerTorque = MODBUS_GET_INT32_FROM_INT16(tab_reg, 119);
+#if DEBUG
+  std::cout << "Counts per torque " << m_calibrationData.countsPerTorque << std::endl;
+#endif
+  for (unsigned int i = 0; i < 6; i++)
+  {
+  	m_calibrationData.gageGain[i] = tab_reg[121 + i];
+  }
+  for (unsigned int i = 0; i < 6; i++)
+  {
+  	m_calibrationData.gageOffset[i] = tab_reg[127 + i];
+  }
+  return true;
+}
 
-  uint16_t gageGain[6];
-  std::cout << "gageGain = [";
-  for (unsigned int i = 0; i < 6; i++)
+bool ForceTorqueCtrl::SetStorageLock(bool lock)
+{
+  uint8_t lockCode;
+  if (lock)
   {
-	  gageGain[i] = tab_reg[110+i];
-	  std::cout << gageGain[i] << ", ";
+	lockCode = 0x18;
   }
-  std::cout << "]" << std::endl;
-
-  uint16_t gageOffset[6];
-  std::cout << "gageOffset = [";
-  for (unsigned int i = 0; i < 6; i++)
+  else
   {
-	  gageOffset[i] = tab_reg[116+i];
-	  std::cout << gageOffset[i] << ", ";
+	lockCode = 0xaa;
   }
-  std::cout << "]" << std::endl;
 
+  uint8_t raw_req[] = { m_ModbusBaseIdentifier, 0x6a, lockCode };		//OpCode is 0x6a = 104, Data is 0x18 (to lock) or 0xaa (to unlock) as specified in 8.3.1.
+  uint8_t rsp[MODBUS_RTU_MAX_ADU_LENGTH];
+  int req_length = modbus_send_raw_request(m_modbusCtrl, raw_req, 3 * sizeof(uint8_t));
+  int len = modbus_receive_confirmation(m_modbusCtrl, rsp);
+
+  if (len == -1)
+  {
+    return false;
+  }
+  std::cout << "Setting storage lock was successful" << std::endl;
+
+  return true;
+}
+
+bool ForceTorqueCtrl::ReadStatusWord()
+{
+#if DEBUG
+  std::cout << "\n\n*********FTStatusWord**********" << std::endl;
+#endif
+  uint16_t tab_reg[1];
+
+  int rc = modbus_read_registers(m_modbusCtrl, 0x001D, 1, tab_reg);
+  if (rc == -1)
+  {
+	  #if DEBUG
+		  std::cout << "Reading Status Word failed with status " << rc << std::endl;
+	  #endif
+      fprintf(stderr, "%s\n", modbus_strerror(errno));
+      return true;
+  }
+  if (tab_reg[1] & ST_WATCHDOG_RESET)
+  {
+	  std::cout << "Watchdog reset – the analog board was reset by the watchdog timer." << std::endl;
+  }
+  if (tab_reg[1] & ST_EXC_VOLTAGE_HIGH)
+  {
+	  std::cout << "Excitation voltage too high." << std::endl;
+  }
+  if (tab_reg[1] & ST_EXC_VOLTAGE_LOW)
+  {
+	  std::cout << "Excitation voltage too low." << std::endl;
+  }
+  if (tab_reg[1] & ST_ART_ANALOG_GRND_OOR)
+  {
+	  std::cout << "Artificial analog ground out of range." << std::endl;
+  }
+  if (tab_reg[1] & ST_PWR_HIGH)
+  {
+	  std::cout << "Power supply too high." << std::endl;
+  }
+  if (tab_reg[1] & ST_PWR_LOW)
+  {
+	  std::cout << "Power supply too low." << std::endl;
+  }
+  if (tab_reg[1] & ST_EEPROM_ERR)
+  {
+	  std::cout << "Error accessing stored settings in EEPROM." << std::endl;
+  }
+  if (tab_reg[1] & ST_INV_CONF_DATA)
+  {
+	  std::cout << "Invalid configuration data." << std::endl;
+  }
+  if (tab_reg[1] & ST_STRAIN_GAGE_SUPPLY_HIGH)
+  {
+	  std::cout << "Strain gage bridge supply current too high." << std::endl;
+  }
+  if (tab_reg[1] & ST_STRAIN_GAGE_SUPPLY_LOW)
+  {
+	  std::cout << "Strain gage bridge supply current too low." << std::endl;
+  }
+  if (tab_reg[1] & ST_THERMISTOR_HIGH)
+  {
+	  std::cout << "Thermistor too high." << std::endl;
+  }
+  if (tab_reg[1] & ST_THERMISTOR_LOW)
+  {
+	  std::cout << "Thermistor too low." << std::endl;
+  }
+  if (tab_reg[1] & ST_DAC_READING_OOR)
+  {
+	  std::cout << "DAC reading out of range." << std::endl;
+  }
+  return true;
+}
+
+
+bool ForceTorqueCtrl::readDiagnosticADCVoltages(int index, short int &value)
+{
+  // TODO: Check for Init
+#if DEBUG
+  std::cout << "\n\n*******Read Diagnostic ADC Voltages on index: " << index << "********" << std::endl;
+#endif
   bool ret = true;
 //  CanMsg CMsg;
-//  CMsg.setID(m_CanBaseIdentifier | READ_SERIALNR);
-//  CMsg.setLength(0);
+//  CMsg.setID(m_CanBaseIdentifier | READ_DIAGNOV);
+//  CMsg.setLength(1);
+//  // TODO: offset or typecast index
+//  CMsg.setAt(index, 0);
+//
 //  ret = m_pCanCtrl->transmitMsg(CMsg, true);
+//
 //  if (ret)
 //  {
 //    CanMsg replyMsg;
-//    replyMsg.set(0, 0, 0, 0, 0, 0, 0, 0);
-//    char next_byte ;
-//    //input_file.read( &next_byte, 1 ) ;
 //    ret = m_pCanCtrl->receiveMsgRetry(&replyMsg, 10);
-//
 //    if (ret)
 //    {
 //#if DEBUG
 //      std::cout << "reply ID: \t" << std::hex << replyMsg.getID() << std::endl;
 //      std::cout << "reply Length: \t" << replyMsg.getLength() << std::endl;
 //#endif
-//      if (replyMsg.getID() == (m_CanBaseIdentifier | READ_SERIALNR))
+//      if (replyMsg.getID() == (m_CanBaseIdentifier | READ_DIAGNOV))
 //      {
 //#if DEBUG
-//        std::cout << "Reading Serial Number Succeeded!" << std::endl;
-//        std::cout << "reply Data: \t" << (char)replyMsg.getAt(0) << " " << (char)replyMsg.getAt(1) << " "
-//                  << (char)replyMsg.getAt(2) << " " << (char)replyMsg.getAt(3) << " " << (char)replyMsg.getAt(4) << " "
-//                  << (char)replyMsg.getAt(5) << " " << (char)replyMsg.getAt(6) << " " << (char)replyMsg.getAt(7)
-//                  << std::endl;
+//        std::cout << "Reading Diagnostic ADC Voltage succeed!" << std::endl;
+//        std::cout << "ADC Voltage of diagnostic value " << index << " : " << replyMsg.getAt(0) << " "
+//                  << replyMsg.getAt(1) << std::endl;
+//#endif
+//
+//        ibBuf.bytes[0] = replyMsg.getAt(1);
+//        ibBuf.bytes[1] = replyMsg.getAt(0);
+//        value = ibBuf.value;
+//      }
+//      else
+//        std::cout << "Error: Received wrong opcode!" << std::endl;
+//    }
+//    else
+//      std::cout << "Error: Receiving Message failed!" << std::endl;
+//  }
+//  else
+//  {
+//    std::cout << "ForceTorqueCtrl::readDiagnosticADCVoltages(byte index): Can not transmit message!" << std::endl;
+//  }
+
+  return ret;
+}
+
+bool ForceTorqueCtrl::SetActiveCalibrationMatrix(int num)
+{
+#if DEBUG
+  std::cout << "\n\n*******Setting Active Calibration Matrix Num to: " << num << "********" << std::endl;
+#endif
+  bool ret = true;
+//  CanMsg CMsg;
+//  CMsg.setID(m_CanBaseIdentifier | SET_CALIB);
+//  CMsg.setLength(1);
+//  CMsg.setAt(num, 0);
+//
+//  ret = m_pCanCtrl->transmitMsg(CMsg, true);
+//
+//  if (ret)
+//  {
+//    CanMsg replyMsg;
+//    ret = m_pCanCtrl->receiveMsgRetry(&replyMsg, 10);
+//    if (ret)
+//    {
+//#if DEBUG
+//      std::cout << "reply ID: \t" << std::hex << replyMsg.getID() << std::endl;
+//      std::cout << "reply Length: \t" << replyMsg.getLength() << std::endl;
+//#endif
+//      if (replyMsg.getID() == (m_CanBaseIdentifier | SET_CALIB))
+//      {
+//#if DEBUG
+//        std::cout << "Setting Calibration Matrix succeed!" << std::endl;
+//        std::cout << "Calibration Matrix: " << replyMsg.getAt(0) << " is Activ!" << std::endl;
 //#endif
 //      }
 //      else
@@ -279,314 +389,95 @@ bool ForceTorqueCtrl::ReadFTSerialNumber()
 //    }
 //    else
 //    {
-//#if DEBUG
-//      std::cout << "ForceTorqueCtrl::ReadFTSerialNumber(): Can not read message!" << std::endl;
-//#endif
+//      std::cout << "Error: Receiving Message failed!" << std::endl;
+//      ret = false;
 //    }
 //  }
 //  else
 //  {
-//#if DEBUG
-//    std::cout << "ForceTorqueCtrl::ReadFTSerialNumber(): Can not transmit message!" << std::endl;
-//#endif
+//    std::cout << "ForceTorqueCtrl::SetActiveCalibrationMatrix(int num): Can not transmit message!" << std::endl;
+//    ret = false;
 //  }
 
   return ret;
 }
 
-bool ForceTorqueCtrl::ReadCountsPerUnit()
-{
-#if DEBUG
-  std::cout << "\n\n*********Read Counts Per Unit**********" << std::endl;
-#endif
-  bool ret = true;
-  float countsPerForce = 0, countsPerTorque = 0;
-  CanMsg CMsg;
-  CMsg.setID(m_CanBaseIdentifier | READ_COUNTSPERU);
-  CMsg.setLength(0);
-
-  ret = m_pCanCtrl->transmitMsg(CMsg, true);
-
-  if (ret)
-  {
-    CanMsg replyMsg;
-    ret = m_pCanCtrl->receiveMsgRetry(&replyMsg, 10);
-
-    if (ret)
-    {
-#if DEBUG
-      std::cout << "reply ID: \t" << std::hex << replyMsg.getID() << std::endl;
-      std::cout << "reply Length: \t" << replyMsg.getLength() << std::endl;
-#endif
-      if (replyMsg.getID() == (m_CanBaseIdentifier | READ_COUNTSPERU))
-      {
-#if DEBUG
-        std::cout << "Reading Counts Per Unit Succeeded!" << std::endl;
-        std::cout << "reply Data: \t" << (char)replyMsg.getAt(0) << " " << (char)replyMsg.getAt(1) << " "
-                  << (char)replyMsg.getAt(2) << " " << (char)replyMsg.getAt(3) << " " << (char)replyMsg.getAt(4) << " "
-                  << (char)replyMsg.getAt(5) << " " << (char)replyMsg.getAt(6) << " " << (char)replyMsg.getAt(7)
-                  << std::endl;
-#endif
-      }
-      else
-      {
-#if DEBUG
-        std::cout << "Error: Received wrong opcode!" << std::endl;
-#endif
-        ret = false;
-      }
-
-      intbBuf.bytes[0] = replyMsg.getAt(3);
-      intbBuf.bytes[1] = replyMsg.getAt(2);
-      intbBuf.bytes[2] = replyMsg.getAt(1);
-      intbBuf.bytes[3] = replyMsg.getAt(0);
-      countsPerForce = intbBuf.value;
-
-      intbBuf.bytes[0] = replyMsg.getAt(7);
-      intbBuf.bytes[1] = replyMsg.getAt(6);
-      intbBuf.bytes[2] = replyMsg.getAt(5);
-      intbBuf.bytes[3] = replyMsg.getAt(4);
-      countsPerTorque = intbBuf.value;
-    }
-    else
-    {
-      std::cout << "ForceTorqueCtrl::ReadCountsPerUnit(): Can not read message!" << std::endl;
-    }
-  }
-  else
-  {
-    std::cout << "ForceTorqueCtrl::ReadCountsPerUnit(): Can not transmit message!" << std::endl;
-  }
-#if DEBUG
-  std::cout << "CountsPerforce: " << countsPerForce << "  CountsPerTorque: " << countsPerTorque << std::endl;
-#endif
-  return ret;
-}
-
-bool ForceTorqueCtrl::ReadUnitCodes()
-{
-#if DEBUG
-  std::cout << "\n\n*********Read Unit Codes**********" << std::endl;
-#endif
-  bool ret = true;
-  CanMsg CMsg;
-  CMsg.setID(m_CanBaseIdentifier | READ_UNITCODE);
-  CMsg.setLength(0);
-
-  ret = m_pCanCtrl->transmitMsg(CMsg, true);
-
-  if (ret)
-  {
-    CanMsg replyMsg;
-    ret = m_pCanCtrl->receiveMsgRetry(&replyMsg, 10);
-
-    if (ret)
-    {
-#if DEBUG
-      std::cout << "reply ID: \t" << std::hex << replyMsg.getID() << std::endl;
-      std::cout << "reply Length: \t" << replyMsg.getLength() << std::endl;
-#endif
-      if (replyMsg.getID() == (m_CanBaseIdentifier | READ_UNITCODE))
-      {
-#if DEBUG
-        std::cout << "Reading Unit codes Succeed!" << std::endl;
-        std::cout << "reply Data: \t" << replyMsg.getAt(0) << " " << replyMsg.getAt(1) << std::endl;
-#endif
-      }
-    }
-    else
-    {
-      std::cout << "ForceTorqueCtrl::ReadUnitCodes(): Can not read message!" << std::endl;
-    }
-  }
-  else
-  {
-    std::cout << "ForceTorqueCtrl::ReadUnitCodes(): Can not transmit message!" << std::endl;
-  }
-
-  return ret;
-}
-
-bool ForceTorqueCtrl::readDiagnosticADCVoltages(int index, short int &value)
-{
-  // TODO: Check for Init
-#if DEBUG
-  std::cout << "\n\n*******Read Diagnostic ADC Voltages on index: " << index << "********" << std::endl;
-#endif
-  bool ret = true;
-  CanMsg CMsg;
-  CMsg.setID(m_CanBaseIdentifier | READ_DIAGNOV);
-  CMsg.setLength(1);
-  // TODO: offset or typecast index
-  CMsg.setAt(index, 0);
-
-  ret = m_pCanCtrl->transmitMsg(CMsg, true);
-
-  if (ret)
-  {
-    CanMsg replyMsg;
-    ret = m_pCanCtrl->receiveMsgRetry(&replyMsg, 10);
-    if (ret)
-    {
-#if DEBUG
-      std::cout << "reply ID: \t" << std::hex << replyMsg.getID() << std::endl;
-      std::cout << "reply Length: \t" << replyMsg.getLength() << std::endl;
-#endif
-      if (replyMsg.getID() == (m_CanBaseIdentifier | READ_DIAGNOV))
-      {
-#if DEBUG
-        std::cout << "Reading Diagnostic ADC Voltage succeed!" << std::endl;
-        std::cout << "ADC Voltage of diagnostic value " << index << " : " << replyMsg.getAt(0) << " "
-                  << replyMsg.getAt(1) << std::endl;
-#endif
-
-        ibBuf.bytes[0] = replyMsg.getAt(1);
-        ibBuf.bytes[1] = replyMsg.getAt(0);
-        value = ibBuf.value;
-      }
-      else
-        std::cout << "Error: Received wrong opcode!" << std::endl;
-    }
-    else
-      std::cout << "Error: Receiving Message failed!" << std::endl;
-  }
-  else
-  {
-    std::cout << "ForceTorqueCtrl::readDiagnosticADCVoltages(byte index): Can not transmit message!" << std::endl;
-  }
-
-  return ret;
-}
-
-bool ForceTorqueCtrl::SetActiveCalibrationMatrix(int num)
-{
-#if DEBUG
-  std::cout << "\n\n*******Setting Active Calibration Matrix Num to: " << num << "********" << std::endl;
-#endif
-  bool ret = true;
-  CanMsg CMsg;
-  CMsg.setID(m_CanBaseIdentifier | SET_CALIB);
-  CMsg.setLength(1);
-  CMsg.setAt(num, 0);
-
-  ret = m_pCanCtrl->transmitMsg(CMsg, true);
-
-  if (ret)
-  {
-    CanMsg replyMsg;
-    ret = m_pCanCtrl->receiveMsgRetry(&replyMsg, 10);
-    if (ret)
-    {
-#if DEBUG
-      std::cout << "reply ID: \t" << std::hex << replyMsg.getID() << std::endl;
-      std::cout << "reply Length: \t" << replyMsg.getLength() << std::endl;
-#endif
-      if (replyMsg.getID() == (m_CanBaseIdentifier | SET_CALIB))
-      {
-#if DEBUG
-        std::cout << "Setting Calibration Matrix succeed!" << std::endl;
-        std::cout << "Calibration Matrix: " << replyMsg.getAt(0) << " is Activ!" << std::endl;
-#endif
-      }
-      else
-      {
-#if DEBUG
-        std::cout << "Error: Received wrong opcode!" << std::endl;
-#endif
-        ret = false;
-      }
-    }
-    else
-    {
-      std::cout << "Error: Receiving Message failed!" << std::endl;
-      ret = false;
-    }
-  }
-  else
-  {
-    std::cout << "ForceTorqueCtrl::SetActiveCalibrationMatrix(int num): Can not transmit message!" << std::endl;
-    ret = false;
-  }
-
-  return ret;
-}
-
-bool ForceTorqueCtrl::SetBaudRate(int value)
+bool ForceTorqueCtrl::SetBaudRate(int value, bool setVolatile)
 {
 #if DEBUG
   std::cout << "\n\n*******Setting Baud Rate value to: " << value << "********" << std::endl;
 #endif
-  bool ret = true;
-  CanMsg CMsg;
-  CMsg.setID(m_CanBaseIdentifier | SET_BAUD);
-  CMsg.setLength(1);
-  CMsg.setAt(value, 0);
-
-  ret = m_pCanCtrl->transmitMsg(CMsg, true);
-
-  if (ret)
+  uint16_t baudrateIndex = 0;
+  if (value == MODBUSBAUD_125K)
   {
-    CanMsg replyMsg;
-    ret = m_pCanCtrl->receiveMsgRetry(&replyMsg, 10);
-    if (ret)
-    {
-#if DEBUG
-      std::cout << "reply ID: \t" << std::hex << replyMsg.getID() << std::endl;
-      std::cout << "reply Length: \t" << replyMsg.getLength() << std::endl;
-#endif
-      if (replyMsg.getID() == (m_CanBaseIdentifier | SET_BAUD))
-      {
-#if DEBUG
-        std::cout << "Send Baud Rate value: " << CMsg.getAt(0) << "!" << std::endl;
-        std::cout << "Setting Baud Rate succeed!" << std::endl;
-#endif
-      }
-      else
-      {
-        std::cout << "Error: Received wrong opcode!" << std::endl;
-        ret = false;
-      }
-    }
-    else
-    {
-      std::cout << "Error: Receiving Message failed!" << std::endl;
-      ret = false;
-    }
+	  baudrateIndex = 0;
   }
-  else
+  else if (value == MODBUSBAUD_115200)
   {
-    std::cout << "ForceTorqueCtrl::SetBaudRate(int value): Can not transmit message!" << std::endl;
-    ret = false;
+	  baudrateIndex = 2;
+  }
+  else if (value == MODBUSBAUD_19200)
+  {
+	  baudrateIndex = 1;
+  }
+  else //Baudrate not supported
+  {
+	  fprintf(stderr, "Baudrate %i is not supported \n", value);
+	  return false;
   }
 
-  return ret;
+  //If Baudrate should be set non-volatile, the 0x001E flag has to be set first (According to 8.3.2 of the sensors user manual)
+  if(!setVolatile)
+  {
+	  uint16_t tab_reg[1] = {1};
+
+	  int rc = modbus_write_registers(m_modbusCtrl, 0x001E, 1, tab_reg);
+	  if (rc == -1)
+	  {
+		  #if DEBUG
+			  std::cout << "Setting non-volatile baud rate flag failed with status " << rc << std::endl;
+		  #endif
+	      fprintf(stderr, "%s\n", modbus_strerror(errno));
+	      return false;
+	  }
+  }
+
+  uint16_t tab_reg[1] = {baudrateIndex};
+
+  int rc = modbus_write_registers(m_modbusCtrl, 0x001F, 1, tab_reg);
+  if (rc == -1)
+  {
+	  #if DEBUG
+		  std::cout << "Setting baudrate failed with status " << rc << std::endl;
+	  #endif
+      fprintf(stderr, "%s\n", modbus_strerror(errno));
+      return false;
+  }
+  m_ModbusBaudrate = value;
+  //Reset connection here
+  Reset();
+
+  return true;
 }
 
 bool ForceTorqueCtrl::Reset()
 {
-  std::cout << "\n\n******* Reseting the NETCANOEM ********" << std::endl;
-  bool ret = true;
-  CanMsg CMsg;
-  CMsg.setID(m_CanBaseIdentifier | RESET);
-  CMsg.setLength(0);
-
-  ret = m_pCanCtrl->transmitMsg(CMsg, true);
-
-  if (!ret)
+  std::cout << "\n\n******* Reseting the RS485 Interface ********" << std::endl;
+  if (!Close())
   {
-    std::cout << "ForceTorqueCtrl::Reset(): Can not transmit message!" << std::endl;
-    ret = false;
+	  return false;
   }
-
-  usleep(10000);
-
-  return ret;
+  if (!Init())
+  {
+	  return false;
+  }
+  return true;
 }
 
 bool ForceTorqueCtrl::Close()
 {
-  modbus_close(modbusCtrl);
-  modbus_free(modbusCtrl);
+  modbus_close(m_modbusCtrl);
+  modbus_free(m_modbusCtrl);
 
   return true;
 }
@@ -598,48 +489,48 @@ bool ForceTorqueCtrl::SetBaseIdentifier(int identifier)
             << std::endl;
 #endif
   bool ret = true;
-  CanMsg CMsg;
-  CMsg.setID(m_CanBaseIdentifier | SET_BASEID);
-  CMsg.setLength(1);
-  CMsg.setAt(identifier, 0);
-
-  ret = m_pCanCtrl->transmitMsg(CMsg, true);
-
-  if (ret)
-  {
-    CanMsg replyMsg;
-    ret = m_pCanCtrl->receiveMsgRetry(&replyMsg, 10);
-    if (ret)
-    {
-#if DEBUG
-      std::cout << "reply ID: \t" << std::hex << replyMsg.getID() << std::endl;
-      std::cout << "reply Length: \t" << replyMsg.getLength() << std::endl;
-#endif
-      if (replyMsg.getID() == (m_CanBaseIdentifier | SET_BASEID))
-      {
-#if DEBUG
-        std::cout << "Setting Base Identifier succeed!" << std::endl;
-        std::cout << "Send Base Identifier value: " << std::hex << CMsg.getAt(0) << "!" << std::endl;
-#endif
-        ret = true;
-      }
-      else
-      {
-        std::cout << "Error: Received wrong opcode!" << std::endl;
-        ret = false;
-      }
-    }
-    else
-    {
-      std::cout << "Error: Receiving Message failed!" << std::endl;
-      ret = false;
-    }
-  }
-  else
-  {
-    std::cout << "ForceTorqueCtrl::SetBaseIdentifier(int identifier): Can not transmit message!" << std::endl;
-    ret = false;
-  }
+//  CanMsg CMsg;
+//  CMsg.setID(m_CanBaseIdentifier | SET_BASEID);
+//  CMsg.setLength(1);
+//  CMsg.setAt(identifier, 0);
+//
+//  ret = m_pCanCtrl->transmitMsg(CMsg, true);
+//
+//  if (ret)
+//  {
+//    CanMsg replyMsg;
+//    ret = m_pCanCtrl->receiveMsgRetry(&replyMsg, 10);
+//    if (ret)
+//    {
+//#if DEBUG
+//      std::cout << "reply ID: \t" << std::hex << replyMsg.getID() << std::endl;
+//      std::cout << "reply Length: \t" << replyMsg.getLength() << std::endl;
+//#endif
+//      if (replyMsg.getID() == (m_CanBaseIdentifier | SET_BASEID))
+//      {
+//#if DEBUG
+//        std::cout << "Setting Base Identifier succeed!" << std::endl;
+//        std::cout << "Send Base Identifier value: " << std::hex << CMsg.getAt(0) << "!" << std::endl;
+//#endif
+//        ret = true;
+//      }
+//      else
+//      {
+//        std::cout << "Error: Received wrong opcode!" << std::endl;
+//        ret = false;
+//      }
+//    }
+//    else
+//    {
+//      std::cout << "Error: Receiving Message failed!" << std::endl;
+//      ret = false;
+//    }
+//  }
+//  else
+//  {
+//    std::cout << "ForceTorqueCtrl::SetBaseIdentifier(int identifier): Can not transmit message!" << std::endl;
+//    ret = false;
+//  }
 
   return ret;
 }
@@ -649,151 +540,31 @@ void ForceTorqueCtrl::ReadCalibrationMatrix()
   Eigen::VectorXf vCoef(6);
 
   // Read Fx coefficients
-  ReadMatrix(0, vCoef);
+  //ReadMatrix(0, vCoef);
   m_v3FXGain = vCoef;
 
   // Read Fy coefficients
-  ReadMatrix(1, vCoef);
+  //ReadMatrix(1, vCoef);
   m_v3FYGain = vCoef;
 
   // Read Fz coefficients
-  ReadMatrix(2, vCoef);
+  //ReadMatrix(2, vCoef);
   m_v3FZGain = vCoef;
 
   // Read Tx coefficients
-  ReadMatrix(3, vCoef);
+  //ReadMatrix(3, vCoef);
   m_v3TXGain = vCoef;
 
   // Read Ty coefficients
-  ReadMatrix(4, vCoef);
+  //ReadMatrix(4, vCoef);
   m_v3TYGain = vCoef;
 
   // Read Tz coefficients
-  ReadMatrix(5, vCoef);
+  //ReadMatrix(5, vCoef);
   m_v3TZGain = vCoef;
   SetCalibMatrix();
 }
 
-void ForceTorqueCtrl::ReadMatrix(int axis, Eigen::VectorXf &vec)
-{
-#if DEBUG
-  std::cout << "\n\n*******Read Matrix**********" << std::endl;
-#endif
-  float statusCode = 0, sg0 = 0.0, sg1 = 0.0, sg2 = 0.0, sg3 = 0.0, sg4 = 0.0, sg5 = 0.0;
-
-  CanMsg CMsg;
-  CMsg.setID(m_CanBaseIdentifier | READ_MATRIX);
-  CMsg.setLength(1);
-  CMsg.setAt(axis, 0);
-
-  bool ret = m_pCanCtrl->transmitMsg(CMsg, true);
-  if (!ret)
-  {
-    std::cout << "Error: Requesting Calibration Matrix!" << std::endl;
-    return;
-  }
-
-  CanMsg replyMsg;
-  bool ret2 = m_pCanCtrl->receiveMsgRetry(&replyMsg, 10);
-  if (ret2)
-  {
-#if DEBUG
-    std::cout << "reply ID: \t" << std::hex << replyMsg.getID() << std::endl;
-    std::cout << "reply Length: \t" << replyMsg.getLength() << std::endl;
-#endif
-    if (replyMsg.getID() == (m_CanBaseIdentifier | READ_MATRIX))
-    {
-#if DEBUG
-      std::cout << "Reading Matrix Succeeded!" << std::endl;
-      std::cout << "reply Data: \t" << replyMsg.getAt(0) << " " << replyMsg.getAt(1) << " " << replyMsg.getAt(2) << " "
-                << replyMsg.getAt(3) << " " << replyMsg.getAt(4) << " " << replyMsg.getAt(5) << " " << replyMsg.getAt(6)
-                << " " << replyMsg.getAt(7) << std::endl;
-#endif
-    }
-    else
-    {
-      std::cout << "Error: Received wrong opcode!" << std::endl;
-      ret = false;
-    }
-
-    fbBuf.bytes[0] = replyMsg.getAt(3);
-    fbBuf.bytes[1] = replyMsg.getAt(2);
-    fbBuf.bytes[2] = replyMsg.getAt(1);
-    fbBuf.bytes[3] = replyMsg.getAt(0);
-    sg0 = fbBuf.value;
-
-    fbBuf.bytes[0] = replyMsg.getAt(7);
-    fbBuf.bytes[1] = replyMsg.getAt(6);
-    fbBuf.bytes[2] = replyMsg.getAt(5);
-    fbBuf.bytes[3] = replyMsg.getAt(4);
-    sg1 = fbBuf.value;
-  }
-  else
-    return;
-
-  ret2 = m_pCanCtrl->receiveMsgRetry(&replyMsg, 10);
-  if (ret2)
-  {
-#if DEBUG
-    std::cout << "reply ID: \t" << std::hex << replyMsg.getID() << std::endl;
-    std::cout << "reply Length: \t" << replyMsg.getLength() << std::endl;
-    std::cout << "reply Data: \t" << replyMsg.getAt(0) << " " << replyMsg.getAt(1) << " " << replyMsg.getAt(2) << " "
-              << replyMsg.getAt(3) << " " << replyMsg.getAt(4) << " " << replyMsg.getAt(5) << " " << replyMsg.getAt(6)
-              << " " << replyMsg.getAt(7) << std::endl;
-#endif
-
-    fbBuf.bytes[0] = replyMsg.getAt(3);
-    fbBuf.bytes[1] = replyMsg.getAt(2);
-    fbBuf.bytes[2] = replyMsg.getAt(1);
-    fbBuf.bytes[3] = replyMsg.getAt(0);
-    sg2 = fbBuf.value;
-
-    fbBuf.bytes[0] = replyMsg.getAt(7);
-    fbBuf.bytes[1] = replyMsg.getAt(6);
-    fbBuf.bytes[2] = replyMsg.getAt(5);
-    fbBuf.bytes[3] = replyMsg.getAt(4);
-    sg3 = fbBuf.value;
-  }
-  else
-    return;
-
-  ret2 = m_pCanCtrl->receiveMsgRetry(&replyMsg, 10);
-  if (ret2)
-  {
-#if DEBUG
-    std::cout << "reply ID: \t" << std::hex << replyMsg.getID() << std::endl;
-    std::cout << "reply Length: \t" << replyMsg.getLength() << std::endl;
-    std::cout << "reply Data: \t" << replyMsg.getAt(0) << " " << replyMsg.getAt(1) << " " << replyMsg.getAt(2) << " "
-              << replyMsg.getAt(3) << " " << replyMsg.getAt(4) << " " << replyMsg.getAt(5) << " " << replyMsg.getAt(6)
-              << " " << replyMsg.getAt(7) << std::endl;
-#endif
-
-    fbBuf.bytes[0] = replyMsg.getAt(3);
-    fbBuf.bytes[1] = replyMsg.getAt(2);
-    fbBuf.bytes[2] = replyMsg.getAt(1);
-    fbBuf.bytes[3] = replyMsg.getAt(0);
-    sg4 = fbBuf.value;
-
-    fbBuf.bytes[0] = replyMsg.getAt(7);
-    fbBuf.bytes[1] = replyMsg.getAt(6);
-    fbBuf.bytes[2] = replyMsg.getAt(5);
-    fbBuf.bytes[3] = replyMsg.getAt(4);
-    sg5 = fbBuf.value;
-  }
-  else
-    return;
-
-  vec[0] = sg0;
-  vec[1] = sg1;
-  vec[2] = sg2;
-  vec[3] = sg3;
-  vec[4] = sg4;
-  vec[5] = sg5;
-#if DEBUG
-  std::cout << "Matix:  SG0: " << sg0 << " SG1: " << sg1 << " SG2: " << sg2 << " SG3: " << sg3 << " SG4: " << sg4
-            << " SG5: " << sg5 << std::endl;
-#endif
-}
 
 bool ForceTorqueCtrl::ReadFirmwareVersion()
 {
@@ -801,144 +572,27 @@ bool ForceTorqueCtrl::ReadFirmwareVersion()
   std::cout << "\n\n*******Reading Firmware Version*******" << std::endl;
 #endif
   bool ret = true;
-  CanMsg CMsg;
-  CMsg.setID(m_CanBaseIdentifier | READ_FIRMWARE);
-  CMsg.setLength(0);
-
-  ret = m_pCanCtrl->transmitMsg(CMsg, true);
-
-  if (ret)
-  {
-    CanMsg replyMsg;
-    ret = m_pCanCtrl->receiveMsgRetry(&replyMsg, 10);
-    if (ret)
-    {
-#if DEBUG
-      std::cout << "reply ID: \t" << std::hex << replyMsg.getID() << std::endl;
-      std::cout << "reply Length: \t" << replyMsg.getLength() << std::endl;
-#endif
-      if (replyMsg.getID() == (m_CanBaseIdentifier | READ_FIRMWARE))
-      {
-#if DEBUG
-        std::cout << "Reading Firmware Succeed!" << std::endl;
-        std::cout << "reply Data: \t" << replyMsg.getAt(0) << " " << replyMsg.getAt(1) << " " << replyMsg.getAt(2)
-                  << " " << replyMsg.getAt(3) << std::endl;
-#endif
-      }
-      else
-      {
-        std::cout << "Error: Received wrong opcode!" << std::endl;
-        ret = false;
-      }
-    }
-    else
-    {
-      std::cout << "Error: Receiving Message failed!" << std::endl;
-      ret = false;
-    }
-  }
-  else
-  {
-    std::cout << "Error: Transmiting Message failed!" << std::endl;
-    ret = false;
-  }
-
+// TODO Find equivalent over modbus?
   return ret;
 }
 
 bool ForceTorqueCtrl::ReadSGData(int statusCode, double &Fx, double &Fy, double &Fz, double &Tx, double &Ty, double &Tz)
 {
   int sg0 = 0, sg1 = 0, sg2 = 0, sg3 = 0, sg4 = 0, sg5 = 0;
-
-  CanMsg CMsg;
-  CMsg.setID(m_CanBaseIdentifier | READ_SG);
-  CMsg.setLength(0);
-  bool ret = m_pCanCtrl->transmitMsg(CMsg, true);
-
-  if (!ret)
+  if (!isStreaming)
   {
-    std::cout << "ForceTorqueCtrl::ReadSGData: Error: Transmiting message failed!" << std::endl;
-    return false;
+	  StartStreaming();
   }
 
-  CanMsg replyMsg;
-  bool ret2 = m_pCanCtrl->receiveMsgRetry(&replyMsg, 10);
-  unsigned char c[2];
-  if (ret2)
-  {
-    if (replyMsg.getID() != (m_CanBaseIdentifier | 0x0))
-    {
-      std::cout << "ForceTorqueCtrl::ReadSGData: Error: Received wrong opcode (Should be 0x200)!" << std::endl;
-      std::cout << "reply ID: \t" << std::hex << replyMsg.getID() << std::endl;
-      std::cout << "reply Length: \t" << replyMsg.getLength() << std::endl;
-      std::cout << "reply Data: \t" << replyMsg.getAt(0) << " " << replyMsg.getAt(1) << " " << replyMsg.getAt(2) << " "
-                << replyMsg.getAt(3) << " " << replyMsg.getAt(4) << " " << replyMsg.getAt(5) << " " << replyMsg.getAt(6)
-                << " " << replyMsg.getAt(7) << std::endl;
-      return false ;
-    }
-
-    c[0] = replyMsg.getAt(0);  // status code
-    c[1] = replyMsg.getAt(1);
-    statusCode = (short)((c[0] << 8) | c[1]);
-
-    if (statusCode != 0)
-    {
-      if (statusCode & 0x4000)
-      {
-        std::cout << "ForceTorqueCtrl::ReadSGData: CAN bus error detected!" << std::endl;
-        Reset();
-        std::cout << "ForceTorqueCtrl::ReadSGData: FTS reseted!" << std::endl;
-      }
-      else
-      {
-        std::cout << "ForceTorqueCtrl::ReadSGData: Error: Something is wrong with sensor!" << std::endl;
-        std::cout << std::hex << statusCode << std::endl;
-      }
-    }
-
-    c[0] = replyMsg.getAt(2);  // sg0
-    c[1] = replyMsg.getAt(3);
-    sg0 = (short)((c[0] << 8) | c[1]);
-
-    c[0] = replyMsg.getAt(4);  // sg2
-    c[1] = replyMsg.getAt(5);
-    sg2 = (short)((c[0] << 8) | c[1]);
-
-    c[0] = replyMsg.getAt(6);  // sg4
-    c[1] = replyMsg.getAt(7);
-    sg4 = (short)((c[0] << 8) | c[1]);
-  }
-  else
-    return false;
-
-  ret2 = m_pCanCtrl->receiveMsgRetry(&replyMsg, 10);
-  if (ret2)
-  {
-    if (replyMsg.getID() != (m_CanBaseIdentifier | 0x1))
-    {
-      std::cout << "ForceTorqueCtrl::ReadSGData: Error: Received wrong opcode (Should be 0x201)!" << std::endl;
-      std::cout << "reply ID: \t" << std::hex << replyMsg.getID() << std::endl;
-      std::cout << "reply Length: \t" << replyMsg.getLength() << std::endl;
-      std::cout << "reply Data: \t" << replyMsg.getAt(0) << " " << replyMsg.getAt(1) << " " << replyMsg.getAt(2) << " "
-                << replyMsg.getAt(3) << " " << replyMsg.getAt(4) << " " << replyMsg.getAt(5) << " " << replyMsg.getAt(6)
-                << " " << replyMsg.getAt(7) << std::endl;
-      return false ;
-    }
-
-    c[0] = replyMsg.getAt(0);  // sg1
-    c[1] = replyMsg.getAt(1);
-    sg1 = (short)((c[0] << 8) | c[1]);
-
-    c[0] = replyMsg.getAt(2);  // sg3
-    c[1] = replyMsg.getAt(3);
-    sg3 = (short)((c[0] << 8) | c[1]);
-
-    c[0] = replyMsg.getAt(4);  // sg5
-    c[1] = replyMsg.getAt(5);
-    sg5 = (short)((c[0] << 8) | c[1]);
-  }
-  else
-    return false;
+  bool ret = true;
+  m_read_mutex.lock();
+  sg0 = m_buffer.gageData[0];
+  sg1 = m_buffer.gageData[1];
+  sg2 = m_buffer.gageData[2];
+  sg3 = m_buffer.gageData[3];
+  sg4 = m_buffer.gageData[4];
+  sg5 = m_buffer.gageData[5];
+  m_read_mutex.unlock();
 
   StrainGaugeToForce(sg0, sg1, sg2, sg3, sg4, sg5);
   Fx = m_vForceData(0);
@@ -947,7 +601,121 @@ bool ForceTorqueCtrl::ReadSGData(int statusCode, double &Fx, double &Fy, double 
   Tx = m_vForceData(3);
   Ty = m_vForceData(4);
   Tz = m_vForceData(5);
+
   return true;
+}
+
+bool ForceTorqueCtrl::StartStreaming()
+{
+	if (!isStreaming)
+	{
+		uint8_t raw_req[] = { m_ModbusBaseIdentifier, 0x46, 0x55 };		//OpCode is 0x46 = 70, Data is 0x55 as specified in 8.3.1.
+		uint8_t rsp[MODBUS_RTU_MAX_ADU_LENGTH];
+		int req_length = modbus_send_raw_request(m_modbusCtrl, raw_req, 3 * sizeof(uint8_t));
+		int len = modbus_receive_confirmation(m_modbusCtrl, rsp);
+
+		if (len == -1)
+		{
+			return false;
+		}
+		else if (rsp[0] == 1)
+		{
+			//Confirmed
+			std::cout << "Start streaming" << std::endl;
+
+			/* Open File Descriptor */
+			m_rs485 = open( m_RS485Device.c_str(), O_RDWR| O_NONBLOCK | O_NDELAY );
+			/* Error Handling */
+			if ( m_rs485 < 0 )
+			{
+				std::cout << "Error " << errno << " opening " << m_RS485Device << ": " << strerror (errno) << std::endl;
+			}
+			isStreaming = true;
+		}
+		m_readThread = new std::thread(&ForceTorqueCtrl::ReadDataLoop, this);
+	}
+	return true;
+}
+
+bool ForceTorqueCtrl::ReadData()
+{
+	if (isStreaming)
+	{
+		/* Allocate memory for read buffer */
+		uint8_t buf [13];
+		memset (&buf, 0, sizeof buf);
+
+		/* *** READ *** */
+		int n = read( m_rs485, &buf , sizeof buf );
+
+		/* Error Handling */
+		if (n < 0)
+		{
+		     std::cout << "Error reading: " << strerror(errno) << std::endl;
+		}
+
+		uint8_t check = buf[12];
+
+		if (((check >> 7) & 0x01))	//Check status bit
+		{
+			//If it is set to 1, an error occured -> Stop streaming
+
+			return false;
+		}
+		uint8_t checksum = check & 0x7F;
+
+
+		int compareChecksum = 0;
+		for (unsigned int i = 0; i < 11; i++)
+		{
+			compareChecksum += buf[i];
+		}
+		if ((compareChecksum & 0x7F) != checksum)
+		{
+			std::cout << "Package has invalid checksum! Ignoring data..." << std::endl;
+			return false;
+		}
+		m_read_mutex.lock();
+		m_buffer.gageData[0] = buf[0] | (buf[1] << 8);
+		m_buffer.gageData[1]  = buf[6] | (buf[7] << 8);
+		m_buffer.gageData[2]  = buf[2] | (buf[3] << 8);
+		m_buffer.gageData[3]  = buf[8] | (buf[9] << 8);
+		m_buffer.gageData[4]  = buf[4] | (buf[5] << 8);
+		m_buffer.gageData[5]  = buf[10] | (buf[11] << 8);
+		m_buffer.timestamp = ros::Time::now();
+		m_read_mutex.unlock();
+	}
+}
+
+void ForceTorqueCtrl::ReadDataLoop()
+{
+	if (isStreaming)
+	{
+		if (!ReadData())
+		{
+			std::cout << "Error while reading. " << std::endl;
+			StopStreaming();
+			sleep(1000);
+			ReadStatusWord();
+		}
+		usleep((unsigned int)(1000000/m_ModbusBaudrate));	//TODO sleep less?
+	}
+}
+
+
+bool ForceTorqueCtrl::StopStreaming()
+{
+	if (isStreaming)
+	{
+		unsigned char cmd[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,	//Send jamming sequence of 14 bytes to stop streaming
+								0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+		int n_written = write( m_rs485, cmd, sizeof(cmd) -1);
+		if (m_readThread)
+		{
+			m_readThread->join();
+		}
+		isStreaming = false;
+	}
 }
 
 void ForceTorqueCtrl::StrainGaugeToForce(int &sg0, int &sg1, int &sg2, int &sg3, int &sg4, int &sg5)
@@ -1114,47 +882,13 @@ void ForceTorqueCtrl::CalcCalibMatrix()
 void ForceTorqueCtrl::SetCalibMatrix()
 {
   Eigen::MatrixXf tmp(6, 6);
-  tmp(0) = m_v3FXGain[0];
-  tmp(1) = m_v3FXGain[1];
-  tmp(2) = m_v3FXGain[2];
-  tmp(3) = m_v3FXGain[3];
-  tmp(4) = m_v3FXGain[4];
-  tmp(5) = m_v3FXGain[5];
-
-  tmp(6) = m_v3FYGain[0];
-  tmp(7) = m_v3FYGain[1];
-  tmp(8) = m_v3FYGain[2];
-  tmp(9) = m_v3FYGain[3];
-  tmp(10) = m_v3FYGain[4];
-  tmp(11) = m_v3FYGain[5];
-
-  tmp(12) = m_v3FZGain[0];
-  tmp(13) = m_v3FZGain[1];
-  tmp(14) = m_v3FZGain[2];
-  tmp(15) = m_v3FZGain[3];
-  tmp(16) = m_v3FZGain[4];
-  tmp(17) = m_v3FZGain[5];
-
-  tmp(18) = m_v3TXGain[0];
-  tmp(19) = m_v3TXGain[1];
-  tmp(20) = m_v3TXGain[2];
-  tmp(21) = m_v3TXGain[3];
-  tmp(22) = m_v3TXGain[4];
-  tmp(23) = m_v3TXGain[5];
-
-  tmp(24) = m_v3TYGain[0];
-  tmp(25) = m_v3TYGain[1];
-  tmp(26) = m_v3TYGain[2];
-  tmp(27) = m_v3TYGain[3];
-  tmp(28) = m_v3TYGain[4];
-  tmp(29) = m_v3TYGain[5];
-
-  tmp(30) = m_v3TZGain[0];
-  tmp(31) = m_v3TZGain[1];
-  tmp(32) = m_v3TZGain[2];
-  tmp(33) = m_v3TZGain[3];
-  tmp(34) = m_v3TZGain[4];
-  tmp(35) = m_v3TZGain[5];
+  for (unsigned int i = 0; i < 6; i++)
+  {
+    for (unsigned int j = 0; j < 6; j++)
+    {
+    	tmp(i,j) = m_calibrationData.basicMatrix[i][j];
+    }
+  }
 
   m_mXCalibMatrix = tmp.transpose();
 }

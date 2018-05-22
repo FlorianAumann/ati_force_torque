@@ -84,7 +84,7 @@ typedef unsigned char uint8_t;
 
 #include <dynamic_reconfigure/server.h>
 #include <ati_force_torque/CoordinateSystemCalibrationParameters.h>
-#include <ati_force_torque/CanConfigurationParameters.h>
+#include <ati_force_torque/RS485ConfigurationParameters.h>
 #include <ati_force_torque/FTSConfigurationParameters.h>
 #include <ati_force_torque/PublishConfigurationParameters.h>
 #include <ati_force_torque/NodeConfigurationParameters.h>
@@ -116,7 +116,7 @@ public:
 
 protected:
   ati_force_torque::CoordinateSystemCalibrationParameters CS_params_;
-  ati_force_torque::CanConfigurationParameters can_params_;
+  ati_force_torque::RS485ConfigurationParameters rs485_params_;
   ati_force_torque::FTSConfigurationParameters FTS_params_;
   ati_force_torque::PublishConfigurationParameters pub_params_;
   ati_force_torque::NodeConfigurationParameters node_params_;
@@ -160,10 +160,9 @@ private:
   
   uint _num_transform_errors;
 
-  // CAN parameters
-  int canType;
-  std::string canPath;
-  int canBaudrate;
+  // RS485 parameters
+  std::string rs485Path;
+  int rs485Baudrate;
   int ftsBaseID;
   double nodePubFreq, nodePullFreq;
   uint calibrationNMeasurements;

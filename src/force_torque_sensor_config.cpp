@@ -64,10 +64,9 @@ public:
   ros::NodeHandle nh_;
 
 private:
-  // CAN parameters
-  int canType;
-  std::string canPath;
-  int canBaudrate;
+  // RS485 parameters
+  std::string rs485Path;
+  int rs485Baudrate;
   int ftsBaseID;
   int ftsFutureBaudrate;
   int ftsFutureBaseID;
@@ -91,22 +90,13 @@ ForceTorqueConfig::ForceTorqueConfig()
   srvSever_Reset_ = nh_.advertiseService("Reset", &ForceTorqueConfig::srvCallback_Reset, this);
 
   // Read data from parameter server
-  nh_.param<int>("CAN/type", canType, -1);
-  nh_.param<std::string>("CAN/path", canPath, "");
-  nh_.param<int>("CAN/baudrate", canBaudrate, -1);
+  nh_.param<std::string>("RS485/path", rs485Path, "");
+  nh_.param<int>("RS485/baudrate", rs485Baudrate, -1);
   nh_.param<int>("FTS/base_identifier", ftsBaseID, -1);
   nh_.param<int>("FTS/future_baudrate", ftsFutureBaudrate, 7);
   nh_.param<int>("FTS/future_base_id", ftsFutureBaseID, 0x20);
 
-  if (canType != -1)
-  {
-    p_Ftc = new ForceTorqueCtrl(canType, canPath, canBaudrate, ftsBaseID);
-  }
-  else
-  {
-    p_Ftc = new ForceTorqueCtrl();
-  }
-
+  p_Ftc = new ForceTorqueCtrl(rs485Path, rs485Baudrate, ftsBaseID);
   initFts();
 }
 

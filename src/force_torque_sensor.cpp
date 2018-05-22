@@ -54,11 +54,11 @@
  ****************************************************************/
 #include <ati_force_torque/force_torque_sensor.h>
 
-ForceTorqueSensor::ForceTorqueSensor(ros::NodeHandle& nh) : nh_(nh), calibration_params_{nh.getNamespace()+"/Calibration/Offset"}, CS_params_{nh.getNamespace()}, can_params_{nh.getNamespace()+"/CAN"}, FTS_params_{nh.getNamespace()+"/FTS"}, pub_params_{nh.getNamespace()+"/Publish"}, node_params_{nh.getNamespace()+"/Node"}, gravity_params_{nh.getNamespace()+"/GravityCompensation/params"}
+ForceTorqueSensor::ForceTorqueSensor(ros::NodeHandle& nh) : nh_(nh), calibration_params_{nh.getNamespace()+"/Calibration/Offset"}, CS_params_{nh.getNamespace()}, rs485_params_{nh.getNamespace()+"/RS485"}, FTS_params_{nh.getNamespace()+"/FTS"}, pub_params_{nh.getNamespace()+"/Publish"}, node_params_{nh.getNamespace()+"/Node"}, gravity_params_{nh.getNamespace()+"/GravityCompensation/params"}
 {
     calibration_params_.fromParamServer();
     CS_params_.fromParamServer();
-    can_params_.fromParamServer();
+    rs485_params_.fromParamServer();
     FTS_params_.fromParamServer();
     pub_params_.fromParamServer();
     node_params_.fromParamServer();
@@ -102,9 +102,8 @@ ForceTorqueSensor::ForceTorqueSensor(ros::NodeHandle& nh) : nh_(nh), calibration
     reconfigCalibrationSrv_.setCallback(boost::bind(&ForceTorqueSensor::reconfigureCalibrationRequest, this, _1, _2));    
 
     // Read data from parameter server
-    canType = can_params_.type;
-    canPath = can_params_.path;
-    canBaudrate = can_params_.baudrate;
+    rs485Path = rs485_params_.path;
+    rs485Baudrate = rs485_params_.baudrate;
     ftsBaseID = FTS_params_.base_identifier;
     isAutoInit = FTS_params_.auto_init;
     nodePubFreq = node_params_.ft_pub_freq;
@@ -172,14 +171,8 @@ ForceTorqueSensor::ForceTorqueSensor(ros::NodeHandle& nh) : nh_(nh), calibration
         useThresholdFilter = true;
     }
 
-    if (canType != -1)
-    {
-        p_Ftc = new ForceTorqueCtrl(canType, canPath, canBaudrate, ftsBaseID);
-    }
-    else
-    {
-        p_Ftc = new ForceTorqueCtrl();
-    }
+
+	p_Ftc = new ForceTorqueCtrl(rs485Path, rs485Baudrate, ftsBaseID);
 
     if (isAutoInit)
     {

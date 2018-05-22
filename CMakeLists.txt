@@ -15,7 +15,7 @@ find_package(catkin REQUIRED COMPONENTS
   rospy
   std_msgs
   std_srvs
-  teleop_twist_joy
+  #teleop_twist_joy
   tf2
   tf2_geometry_msgs
   tf2_ros
@@ -47,7 +47,7 @@ endif()
 
 generate_ros_parameter_files(
     cfg/CoordinateSystemCalibration.params
-    cfg/CanConfiguration.params
+    cfg/RS485Configuration.params
     cfg/FTSConfiguration.params
     cfg/NodeConfiguration.params
     cfg/PublishConfiguration.params
@@ -86,7 +86,6 @@ include_directories(
   include
   ${catkin_INCLUDE_DIRS}
   ${Eigen_INCLUDE_DIRS}
-  ${Libserial_INCLUDE_DIRS}
   ${Libmodbus_INCLUDE_DIRS}
 )
 
@@ -96,7 +95,7 @@ add_dependencies(${PROJECT_NAME}
   ${PROJECT_NAME}_generate_messages_cpp
   ${PROJECT_NAME}_genparam # For rosparam_handler
   )
-target_link_libraries(${PROJECT_NAME} ${catkin_LIBRARIES} ${Eigen_LIBRARIES} ${Libserial_LIBRARIES} ${Libmodbus_LIBRARIES})
+target_link_libraries(${PROJECT_NAME} ${catkin_LIBRARIES} ${Eigen_LIBRARIES} ${Libmodbus_LIBRARIES})
 
 add_library(${PROJECT_NAME}_sensor_hw common/src/ati_force_torque_hw_can.cpp)
 target_link_libraries(${PROJECT_NAME}_sensor_hw ${catkin_LIBRARIES} ${Eigen_LIBRARIES})

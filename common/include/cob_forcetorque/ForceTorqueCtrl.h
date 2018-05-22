@@ -5,7 +5,7 @@
  * Intelligent Process Control and Robotics (IPR),
  * Karlsruhe Institute of Technology
  *
- * Maintainer: Denis Štogl, email: denis.stogl@kit.edu
+ * Maintainer: Denis ��togl, email: denis.stogl@kit.edu
  *
  * Date of update: 2014-2016
  *
@@ -58,7 +58,9 @@
 // Headers provided by other cob-packages
 #include <cob_generic_can/CanItf.h>
 #include <modbus/modbus-rtu.h>
-#include <modbus/modbus-rtu.h>
+#include <ros/time.h>
+#include <mutex>
+#include <thread>
 
 #define DEBUG 0
 
@@ -83,7 +85,7 @@
 
 #define MODBUSBAUD_125K		1250000
 #define MODBUSBAUD_115200	115200
-#define MODBUSBAUD_19200	1250000
+#define MODBUSBAUD_19200	19200
 
 enum ForceUnit
 {
@@ -105,23 +107,65 @@ enum TorqueUnit
 	TU_KILONEWTONMETER
 };
 
+//Status Words
+#define ST_WATCHDOG_RESET 1
+#define ST_EXC_VOLTAGE_HIGH 2
+#define ST_EXC_VOLTAGE_LOW 4
+#define ST_ART_ANALOG_GRND_OOR 8
+#define ST_PWR_HIGH 16
+#define ST_PWR_LOW 32
+//Bit 6 not used
+#define ST_EEPROM_ERR 128
+#define ST_INV_CONF_DATA 256
+#define ST_STRAIN_GAGE_SUPPLY_HIGH 512
+#define ST_STRAIN_GAGE_SUPPLY_LOW 1024
+#define ST_THERMISTOR_HIGH 2048
+#define ST_THERMISTOR_LOW 4096
+#define ST_DAC_READING_OOR 8192
+
+
+struct CalibrationData
+{
+	  std::string calibSerialNumber;
+	  std::string calibPartNumberNumber;
+	  std::string calibFamilyID;
+	  std::string calibTime;
+	  float basicMatrix[6][6];
+	  uint8_t forceUnitsInt;
+	  uint8_t torqueUnitsInt;
+	  float maxRating[6];
+	  int32_t countsPerForce;
+	  int32_t countsPerTorque;
+	  uint16_t gageGain[6];
+	  uint16_t gageOffset[6];
+};
+
+struct GageVector
+{
+	uint16_t gageData[6];
+	ros::Time timestamp;
+};
+
 class ForceTorqueCtrl
 {
 public:
   ForceTorqueCtrl();
-  ForceTorqueCtrl(int can_type, std::string can_path, int can_baudrate, int base_identifier);
+  ForceTorqueCtrl(std::string device_path, int device_baudrate, int base_identifier);
   ~ForceTorqueCtrl();
 
   bool Init();
-  bool ReadFTSerialNumber();
-  bool ReadCountsPerUnit();
-  bool ReadUnitCodes();
+  bool ReadFTCalibrationData();
+  bool ReadStatusWord();
   bool readDiagnosticADCVoltages(int index, short int& value);
   bool SetActiveCalibrationMatrix(int num);
-  bool SetBaudRate(int value);
+  bool SetBaudRate(int value, bool setVolatile = true);
   bool SetBaseIdentifier(int identifier);
   bool Reset();
   bool Close();
+  bool StartStreaming();
+  bool StopStreaming();
+  bool ReadData();
+  void ReadDataLoop();
   bool ReadSGData(int statusCode, double& Fx, double& Fy, double& Fz, double& Tx, double& Ty, double& Tz);
   bool ReadFirmwareVersion();
   void ReadCalibrationMatrix();
@@ -141,24 +185,23 @@ public:
 
 protected:
   bool initRS485();
+  bool SetStorageLock(bool lock);
 
-  //--------------------------------- Variables
-  CanMsg m_CanMsgRec;
   bool m_bWatchdogErr;
 
 private:
-  CanMsg CMsg;
-  CanItf* m_pCanCtrl;
-  modbus_t* modbusCtrl;
 
-  int m_CanType;
+
+  modbus_t* m_modbusCtrl;
+  int m_rs485;
+
   std::string m_RS485Device;
-  int m_ModbusBaseIdentifier;
+  uint8_t m_ModbusBaseIdentifier;
   int m_ModbusBaudrate;
-  std::string m_CanDevice;
-  int m_CanBaudrate;
-  int m_CanBaseIdentifier;
 
+  bool isStreaming = false;
+
+  CalibrationData m_calibrationData;
   unsigned int d_len;
   Eigen::VectorXf m_v3StrainGaigeOffset;
   Eigen::VectorXf m_v3GaugeGain;
@@ -171,9 +214,13 @@ private:
   Eigen::MatrixXf m_mXCalibMatrix;
   Eigen::MatrixXf m_vForceData;
 
+  GageVector m_buffer;
+  std::mutex m_read_mutex;
+  std::thread* m_readThread;
+
   // the Parameter indicates the Axis row to Read
   // Fx = 0 | Fy = 1 | Fz = 2 | Tx = 3 | Ty = 4 | Tz = 5
-  void ReadMatrix(int axis, Eigen::VectorXf& vec);
+  //void ReadMatrix(int axis, Eigen::VectorXf& vec);
 
   union
   {
